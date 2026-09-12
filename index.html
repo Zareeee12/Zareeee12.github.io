@@ -215,6 +215,11 @@ const defaultAnnual=()=>({
   2026:{monthly:{},monthBooks:{},bestBook:null,worstBook:null,crush:"",trauma:"",repeatAuthor:"",avoidAuthor:"",ranking:[],quotes:[],goal:0}
 });
 
+const SUPABASE_URL="https://yejseqhjuhmyixjtcupd.supabase.co";
+const SUPABASE_KEY="sb_publishable_wPPCCOIKUCGGfk9CtslYSg_2pgzw8cR";
+const SUPABASE_TABLE="zares_books_state";
+const SUPABASE_ROW_ID=1;
+
 let saved=JSON.parse(localStorage.getItem("zaresBooksApp")||"null");
 let state=saved||{books:seedBooks,years:[2025,2026],annual:defaultAnnual(),notes:[],genres:[...genres]};
 if(!state.annual)state.annual=defaultAnnual();
@@ -224,8 +229,50 @@ const originalSeedCount=seedBooks.length;
 if(!saved)localStorage.setItem("zaresBooksApp",JSON.stringify(state));
 
 let currentPage="home", currentTbrTab="por-leer", currentTbrCat="sagas", currentYear=null, currentAnnualTab="calendario";
+let remoteReady=false;
+let remoteSaveTimer=null;
 
-function save(){localStorage.setItem("zaresBooksApp",JSON.stringify(state))}
+function localSave(){localStorage.setItem("zaresBooksApp",JSON.stringify(state))}
+function save(){
+  localSave();
+  if(!remoteReady)return;
+  clearTimeout(remoteSaveTimer);
+  remoteSaveTimer=setTimeout(syncStateToSupabase,250);
+}
+async function syncStateToSupabase(){
+  try{
+    const response=await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_TABLE}?on_conflict=id`,{
+      method:"POST",
+      headers:{"apikey":SUPABASE_KEY,"Authorization":`Bearer ${SUPABASE_KEY}`,"Content-Type":"application/json","Prefer":"resolution=merge-duplicates,return=minimal"},
+      body:JSON.stringify({id:SUPABASE_ROW_ID,data:state,updated_at:new Date().toISOString()})
+    });
+    if(!response.ok)throw new Error(await response.text());
+  }catch(error){console.error("No se pudo sincronizar Zare’s Books:",error);toast("No se pudo sincronizar");}
+}
+async function loadStateFromSupabase(){
+  try{
+    const response=await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_TABLE}?id=eq.${SUPABASE_ROW_ID}&select=data`,{
+      headers:{"apikey":SUPABASE_KEY,"Authorization":`Bearer ${SUPABASE_KEY}`}
+    });
+    if(!response.ok)throw new Error(await response.text());
+    const rows=await response.json();
+    if(rows.length&&rows[0].data){
+      state=rows[0].data;
+      if(!state.annual)state.annual=defaultAnnual();
+      if(!state.years)state.years=[2025,2026];
+      if(!state.genres)state.genres=[...genres];
+      localSave();
+      render();
+    }else{
+      await syncStateToSupabase();
+    }
+    remoteReady=true;
+    toast("Biblioteca sincronizada");
+  }catch(error){
+    console.error("No se pudo cargar Zare’s Books:",error);
+    toast("Modo local: falta configurar la base de datos");
+  }
+}
 function esc(s){return String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]))}
 function toast(t){const x=document.getElementById("toast");x.textContent=t;x.classList.add("show");setTimeout(()=>x.classList.remove("show"),1800)}
 function stars(n){n=+n||0;return "★".repeat(Math.round(n))+"☆".repeat(5-Math.round(n))}
@@ -552,6 +599,7 @@ function openNoteForm(){document.getElementById("modal").innerHTML=`<div class="
 function saveNote(e){e.preventDefault();state.notes.push({title:document.getElementById("nTitle").value.trim(),bookId:document.getElementById("nBook").value||null,text:document.getElementById("nText").value.trim(),date:new Date().toLocaleDateString("es-CO")});save();closeModal();render();toast("Nota guardada")}
 function deleteNote(i){const idx=Number(i);if(!Number.isInteger(idx)||idx<0||idx>=state.notes.length){toast("No encontré esa nota");return false}state.notes.splice(idx,1);save();render();toast("Nota eliminada");return true}
 render();
+loadStateFromSupabase();
 function openYearInput(){
  document.getElementById("modal").innerHTML=`<div class="modal-head"><h3>＋ Agregar año</h3><button class="close" type="button" onclick="closeModal()">×</button></div>
  <div class="form" style="box-shadow:none;padding:18px 0 0">
